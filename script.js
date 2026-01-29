@@ -27,20 +27,20 @@ resizeGame();
 
 // --- BILDER ---
 const characterImg = new Image();
-characterImg.src = "assets/3DPingsta.png"; 
+characterImg.src = "assets/3DPingsta.webp"; 
 
 const chainsawImg = new Image();
-chainsawImg.src = "assets/chainsaw.png"; 
+chainsawImg.src = "assets/chainsaw.webp"; 
 
 const ak47Img = new Image();
-ak47Img.src = "assets/AK47.png";
+ak47Img.src = "assets/AK47.webp";
 
 const bgImg = new Image();
 bgImg.src = "background.png"; 
 
 // --- AUDIO ---
 const fatalityAudio = new Audio("Fatality (Mortal Kombat) - QuickSounds.com.mp3");
-const bgMusic = new Audio("Desire to Return.mp3");
+const bgMusic = new Audio("NIEMAND.mp3");
 bgMusic.loop = true;  
 bgMusic.volume = 0.6; 
 

@@ -36,17 +36,31 @@ const ak47Img = new Image();
 ak47Img.src = "assets/AK47.webp";
 
 const bgImg = new Image();
-bgImg.src = "background.webp"; 
+bgImg.src = "assets/background.webp"; 
+
+const aliceImg = new Image();
+aliceImg.src = "assets/Alice.webp";
+
+const schnitzelImg = new Image();
+schnitzelImg.src = "assets/Schnitzel.webp";
 
 // --- AUDIO ---
 const fatalityAudio = new Audio("Fatality (Mortal Kombat) - QuickSounds.com.mp3");
-const bgMusic = new Audio("NIEMAND.mp3");
+const bgMusic = new Audio("LIEBLOS.mp3");
 bgMusic.loop = true;  
 bgMusic.volume = 0.6; 
 
 // NEU: Waffensound (Muss im Hauptordner liegen!)
 const shotAudio = new Audio("shot.mp3");
-shotAudio.volume = 0.3; // Nicht zu laut, damit Musik hörbar bleibt
+shotAudio.volume = 0.2; // Nicht zu laut, damit Musik hörbar bleibt
+
+// NEU: Chainsaw-Sound (Muss im Hauptordner liegen!)
+const chainsawAudio = new Audio("chainsaw.mp3");
+chainsawAudio.loop = true;
+chainsawAudio.volume = 0.25;
+
+// NEU: Erster Alice-Auftritt Sound (Muss im Hauptordner liegen!)
+const niemandAudio = new Audio("NIEMAND.mp3");
 
 // --- SPIELZUSTÄNDE ---
 const STATE_MENU     = 0; 
@@ -60,6 +74,7 @@ let score = 0;
 let coinsCollected = 0;  
 let highScore = localStorage.getItem("pingstaHighscore") || 0;
 let gameOverTimer = 0; 
+let leaderboardPrompted = false;
 
 // --- GAMEPLAY VARIABLEN ---
 let pipesSpawnedCount = 0;   
@@ -68,6 +83,61 @@ let hasAK47 = false;
 let invincibilityTimer = 0;  
 let activeItem = null;       
 let lostWeapon = null;       
+let enemyFirstSpawned = false;
+let enemyNextSpawnAt = 0;
+let niemandPending = false;
+let enemySpawnCount = 0;
+
+// --- LEADERBOARD ---
+const leaderboardListEl = document.getElementById("leaderboard-list");
+const LEADERBOARD_KEY = "pingstaLeaderboard";
+
+function loadLeaderboard() {
+    try {
+        const raw = localStorage.getItem(LEADERBOARD_KEY);
+        const data = raw ? JSON.parse(raw) : [];
+        return Array.isArray(data) ? data : [];
+    } catch {
+        return [];
+    }
+}
+
+function saveLeaderboard(list) {
+    localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(list));
+}
+
+function updateLeaderboardUI() {
+    if (!leaderboardListEl) return;
+    const list = loadLeaderboard();
+    leaderboardListEl.innerHTML = "";
+    for (let i = 0; i < 3; i++) {
+        const entry = list[i] || { name: "---", score: 0 };
+        const li = document.createElement("li");
+        const nameSpan = document.createElement("span");
+        nameSpan.className = "lb-name";
+        nameSpan.textContent = entry.name;
+        const scoreSpan = document.createElement("span");
+        scoreSpan.className = "lb-score";
+        scoreSpan.textContent = entry.score;
+        li.appendChild(nameSpan);
+        li.appendChild(scoreSpan);
+        leaderboardListEl.appendChild(li);
+    }
+}
+
+function tryAddToLeaderboard(finalScore) {
+    const list = loadLeaderboard();
+    const qualifies = list.length < 3 || finalScore > list[list.length - 1].score;
+    if (!qualifies) return;
+
+    const nameInput = prompt("Neuer Highscore! Name eintragen:", "Player");
+    if (nameInput === null) return;
+    const name = nameInput.trim() || "Player";
+    list.push({ name, score: finalScore });
+    list.sort((a, b) => b.score - a.score);
+    saveLeaderboard(list.slice(0, 3));
+    updateLeaderboardUI();
+}
 
 // Schuss-System
 let bullets = [];
@@ -87,6 +157,8 @@ let explosionParticles = [];
 let screenDrips = [];  
 let coinsCollection = []; 
 let pipesPosition = []; 
+let enemies = [];
+let enemyProjectiles = [];
 
 // ==========================================
 // 2. GRAFIK-FUNKTIONEN
@@ -94,7 +166,7 @@ let pipesPosition = [];
 
 function drawBloodyTitle() {
     const centerX = canvas.width / 2;
-    const topY = 60; 
+    const topY = 90; 
     ctx.save();
     ctx.textAlign = "center";
     ctx.shadowColor = "#FF0000"; ctx.shadowBlur = 15;
@@ -130,6 +202,8 @@ function drawFatalitySequence() {
         ctx.strokeText("GAME OVER", cx, cy - 30); ctx.fillText("GAME OVER", cx, cy - 30);
         ctx.font = "30px 'Creepster', cursive"; ctx.fillStyle = "white"; ctx.lineWidth = 1; ctx.fillText("Score: " + score, cx, cy + 20);
         ctx.fillStyle = "#FFD700"; ctx.font = "25px Arial"; ctx.fillText("Münzen: " + coinsCollected, cx, cy + 55);
+        restartBtn.x = canvas.width / 2 - restartBtn.w / 2;
+        restartBtn.y = canvas.height - 65;
         ctx.shadowBlur = 0; ctx.fillStyle = "#222"; ctx.fillRect(restartBtn.x, restartBtn.y, restartBtn.w, restartBtn.h);
         ctx.strokeStyle = "#FF0055"; ctx.lineWidth = 2; ctx.strokeRect(restartBtn.x, restartBtn.y, restartBtn.w, restartBtn.h);
         ctx.fillStyle = "#FFF"; ctx.font = "bold 16px Arial"; ctx.fillText("WEITER", restartBtn.x + restartBtn.w/2, restartBtn.y + 25);
@@ -208,6 +282,38 @@ function drawItem(item) {
     ctx.restore();
 }
 
+function drawEnemy(enemy) {
+    ctx.save();
+    let bobbing = Math.sin(frames * 0.08 + enemy.phase) * 6;
+    let drawX = enemy.x;
+    let drawY = enemy.y + bobbing;
+    ctx.translate(drawX, drawY);
+    if (enemy.dying) {
+        ctx.rotate(enemy.rv || 0);
+    }
+
+    if (aliceImg.complete && aliceImg.naturalHeight !== 0) {
+        ctx.drawImage(aliceImg, -30, -38, 60, 76);
+    } else {
+        ctx.fillStyle = "#ff66aa";
+        ctx.fillRect(-30, -38, 60, 76);
+    }
+    ctx.restore();
+}
+
+function drawSchnitzel(proj) {
+    ctx.save();
+    ctx.translate(proj.x, proj.y);
+    ctx.rotate(proj.rotation);
+    if (schnitzelImg.complete && schnitzelImg.naturalHeight !== 0) {
+        ctx.drawImage(schnitzelImg, -16, -12, 32, 24);
+    } else {
+        ctx.fillStyle = "#d2a679";
+        ctx.fillRect(-16, -12, 32, 24);
+    }
+    ctx.restore();
+}
+
 // Wegfliegende Waffe
 function drawLostWeapon() {
     if (!lostWeapon) return;
@@ -276,12 +382,11 @@ const bird = {
 
             if (img.complete && img.naturalHeight !== 0) {
                 ctx.save();
-                // Vertikal Flip (auf den Bauch drehen)
-                ctx.scale(-1, -1); 
-                
                 if (hasAK47) {
+                     // AK47 nur horizontal spiegeln (nicht auf dem Rücken)
+                     ctx.scale(-1, 1);
                      // AK47 Position
-                     ctx.drawImage(img, 5, -22 - bobbing, 60, 30);
+                     ctx.drawImage(img, -2, -14 - bobbing, 60, 30);
                      
                      // MÜNDUNGSFEUER
                      if (frames % 8 < 3) {
@@ -292,6 +397,8 @@ const bird = {
                          ctx.fill();
                      }
                 } else {
+                    // Vertikal Flip (auf den Bauch drehen)
+                    ctx.scale(-1, -1);
                     // Chainsaw Position
                     ctx.drawImage(img, 5, -25 - bobbing, 50, 30); 
                 }
@@ -385,6 +492,14 @@ function draw() {
         drawCoin(coinsCollection[i].x, coinsCollection[i].y);
     }
 
+    for (let i = 0; i < enemies.length; i++) {
+        drawEnemy(enemies[i]);
+    }
+
+    for (let i = 0; i < enemyProjectiles.length; i++) {
+        drawSchnitzel(enemyProjectiles[i]);
+    }
+
     if (activeItem) drawItem(activeItem);
     if (lostWeapon) drawLostWeapon();
     
@@ -406,6 +521,30 @@ function triggerSmallBlood(x, y) {
             x: x, y: y,
             vx: (Math.random() - 0.5) * 8, vy: (Math.random() - 0.5) * 8,
             size: Math.random() * 4 + 2, color: "#FF0000" 
+        });
+    }
+}
+
+function triggerBigBlood(x, y) {
+    for (let i = 0; i < 60; i++) {
+        explosionParticles.push({
+            x: x, y: y,
+            vx: (Math.random() - 0.5) * 14,
+            vy: (Math.random() - 0.5) * 14,
+            size: Math.random() * 6 + 3,
+            color: (Math.random() > 0.4) ? "#8a0303" : "#FF0000"
+        });
+    }
+}
+
+function triggerFatalBlood(x, y) {
+    for (let i = 0; i < 60; i++) {
+        explosionParticles.push({
+            x: x, y: y,
+            vx: (Math.random() - 0.5) * 15,
+            vy: (Math.random() - 0.5) * 15,
+            size: Math.random() * 6 + 2,
+            color: (Math.random() > 0.5) ? "#8a0303" : "#FF0000"
         });
     }
 }
@@ -443,6 +582,181 @@ function updateBullets() {
 }
 
 function updateGameObjects() {
+    // 0. GEGNER-SPAWN (erst nach 15s, dann alle 3s)
+    if (enemyNextSpawnAt === 0) {
+        enemyNextSpawnAt = performance.now() + 15000;
+    }
+    const now = performance.now();
+    if (now >= enemyNextSpawnAt) {
+        let minY = 70;
+        let maxY = canvas.height - 70;
+        let spawnY = Math.random() * (maxY - minY) + minY;
+        enemies.push({
+            x: canvas.width + 60,
+            y: spawnY,
+            vx: currentLevel.speed + 1.2,
+            phase: Math.random() * Math.PI * 2,
+            throwTimer: Math.floor(Math.random() * 30),
+            zigDir: Math.random() > 0.5 ? 1 : -1,
+            dying: false,
+            deathTimer: 0,
+            rv: 0
+        });
+        enemySpawnCount++;
+
+        if (!enemyFirstSpawned) {
+            enemyFirstSpawned = true;
+        }
+
+        if (enemySpawnCount === 1 || enemySpawnCount % 8 === 0) {
+            niemandPending = true;
+            niemandAudio.currentTime = 0;
+            niemandAudio.play()
+                .then(() => { niemandPending = false; })
+                .catch(() => { niemandPending = true; });
+        }
+
+        enemyNextSpawnAt = now + 3000;
+    }
+
+    // GEGNER BEWEGEN & SCHNITZEL WERFEN
+    for (let i = 0; i < enemies.length; i++) {
+        let e = enemies[i];
+        if (!e.dying) {
+            e.x -= e.vx;
+            e.throwTimer++;
+
+            // Zick-Zack mit Fokus auf Pinguin (Mitte anpeilen)
+            let targetY = bird.y + bird.h / 2;
+            let zigzag = Math.sin(frames * 0.12 + e.phase) * 18 * e.zigDir;
+            e.y += (targetY - e.y) * 0.02 + zigzag * 0.02;
+
+            if (e.throwTimer >= 60 && e.x < canvas.width + 20 && e.x > bird.x + 20) {
+                e.throwTimer = 0;
+                let targetX = bird.x + bird.w / 2;
+                let targetYShot = bird.y + bird.h / 2;
+                let dx = targetX - e.x;
+                let dy = targetYShot - e.y;
+                let dist = Math.sqrt(dx * dx + dy * dy) || 1;
+                let speed = 4;
+                enemyProjectiles.push({
+                    x: e.x - 20,
+                    y: e.y,
+                    vx: (dx / dist) * speed,
+                    vy: (dy / dist) * speed,
+                    rotation: 0
+                });
+            }
+        } else {
+            e.x += e.vx;
+            e.y += e.vy;
+            e.vy += 0.4;
+            e.rv += 0.25;
+            e.deathTimer++;
+            if (e.deathTimer % 8 === 0) {
+                triggerSmallBlood(e.x, e.y);
+            }
+        }
+
+        if (e.x < -100 || e.x > canvas.width + 200 || e.y > canvas.height + 200 || e.y < -200) {
+            enemies.splice(i, 1);
+            i--;
+        }
+    }
+
+    // SCHNITZEL BEWEGEN & TREFFER PRÜFEN
+    for (let i = 0; i < enemyProjectiles.length; i++) {
+        let s = enemyProjectiles[i];
+        s.x += s.vx;
+        s.y += s.vy;
+        s.rotation += 0.2;
+
+        let dist = Math.sqrt(((bird.x + bird.w / 2) - s.x) ** 2 + ((bird.y + bird.h / 2) - s.y) ** 2);
+        if (dist < 28) {
+            enemyProjectiles.splice(i, 1);
+            i--;
+            if (invincibilityTimer > 0) {
+                continue;
+            }
+            if (hasChainsaw || hasAK47) {
+                let wType = hasChainsaw ? "chainsaw" : "ak47";
+                hasChainsaw = false;
+                hasAK47 = false;
+                chainsawAudio.pause();
+                chainsawAudio.currentTime = 0;
+                invincibilityTimer = 60;
+                triggerSmallBlood(bird.x + bird.w / 2, bird.y + bird.h / 2);
+                lostWeapon = {
+                    x: bird.x + bird.w / 2,
+                    y: bird.y + bird.h / 2,
+                    vx: 5, vy: -6, rotation: 0, type: wType
+                };
+            } else {
+                gameOver();
+            }
+        } else if (
+            s.x < -100 ||
+            s.y < -100 ||
+            s.y > canvas.height + 100 ||
+            (s.vx < 0 && s.x < bird.x - 80) ||
+            (s.vx > 0 && s.x > bird.x + 80)
+        ) {
+            enemyProjectiles.splice(i, 1);
+            i--;
+        }
+    }
+
+    // KOLLISION: BULLETS vs GEGNER
+    for (let i = 0; i < bullets.length; i++) {
+        let b = bullets[i];
+        let hitIndex = -1;
+        for (let j = 0; j < enemies.length; j++) {
+            let e = enemies[j];
+            let bobbing = Math.sin(frames * 0.08 + e.phase) * 6;
+            let ex = e.x - 30;
+            let ey = e.y + bobbing - 38;
+            let ew = 60;
+            let eh = 76;
+            let bx = b.x;
+            let by = b.y;
+            let bw = 12;
+            let bh = 4;
+            if (bx < ex + ew && bx + bw > ex && by < ey + eh && by + bh > ey) {
+                hitIndex = j;
+                break;
+            }
+        }
+        if (hitIndex >= 0) {
+            let hitEnemy = enemies[hitIndex];
+            triggerFatalBlood(hitEnemy.x, hitEnemy.y);
+            hitEnemy.dying = true;
+            hitEnemy.vx = 6;
+            hitEnemy.vy = -6;
+            bullets.splice(i, 1);
+            i--;
+        }
+    }
+
+    // KOLLISION: CHAINSAW vs GEGNER
+    if (hasChainsaw) {
+        // Chainsaw-Hitbox etwas vor dem Pinguin (enger)
+        let cx = bird.x + bird.w + 20;
+        let cy = bird.y + bird.h / 2 - 6;
+        for (let i = 0; i < enemies.length; i++) {
+            let e = enemies[i];
+            let bobbing = Math.sin(frames * 0.08 + e.phase) * 6;
+            let ey = e.y + bobbing;
+            let dist = Math.sqrt((cx - e.x) ** 2 + (cy - ey) ** 2);
+            if (dist < 38 && !e.dying) {
+                triggerFatalBlood(e.x, ey);
+                e.dying = true;
+                e.vx = 6;
+                e.vy = -6;
+                i--;
+            }
+        }
+    }
+
     // 1. SPAWNING
     if (frames % Math.floor(140 / (currentLevel.speed/2.5)) === 0) {
         let min = 50, max = canvas.height - currentLevel.gap - 50;
@@ -482,6 +796,8 @@ function updateGameObjects() {
                     let wType = hasChainsaw ? "chainsaw" : "ak47";
                     hasChainsaw = false; 
                     hasAK47 = false;
+                    chainsawAudio.pause();
+                    chainsawAudio.currentTime = 0;
                     invincibilityTimer = 60; 
                     triggerSmallBlood(bird.x + bird.w/2, bird.y + bird.h/2);
                     lostWeapon = {
@@ -526,8 +842,13 @@ function updateGameObjects() {
 
             hasChainsaw = false;
             hasAK47 = false;
+            chainsawAudio.pause();
+            chainsawAudio.currentTime = 0;
 
-            if (activeItem.type === "chainsaw") hasChainsaw = true;
+            if (activeItem.type === "chainsaw") {
+                hasChainsaw = true;
+                chainsawAudio.play().catch(e => {});
+            }
             if (activeItem.type === "ak47") hasAK47 = true;
             
             activeItem = null; 
@@ -537,6 +858,10 @@ function updateGameObjects() {
 }
 
 function drawUI() {
+    if (leaderboardListEl) {
+        const shouldShow = currentState === STATE_MENU;
+        leaderboardListEl.parentElement.style.display = shouldShow ? "block" : "none";
+    }
     if (currentState === STATE_MENU) {
         drawBloodyTitle();
         ctx.fillStyle = "white"; ctx.font = "14px Arial"; ctx.textAlign = "center";
@@ -570,6 +895,8 @@ function drawUI() {
 function gameOver() {
     currentState = STATE_GAMEOVER;
     gameOverTimer = 0; 
+    chainsawAudio.pause();
+    chainsawAudio.currentTime = 0;
     for (let i = 0; i < 60; i++) { 
         explosionParticles.push({
             x: bird.x + bird.w/2, y: bird.y + bird.h/2,
@@ -584,6 +911,10 @@ function gameOver() {
         });
     }
     if (score > highScore) { highScore = score; localStorage.setItem("pingstaHighscore", highScore); }
+    if (!leaderboardPrompted) {
+        leaderboardPrompted = true;
+        tryAddToLeaderboard(score);
+    }
 }
 
 function reset() {
@@ -600,9 +931,18 @@ function reset() {
     lostWeapon = null; 
     invincibilityTimer = 0;
     bullets = []; 
+    enemies = [];
+    enemyProjectiles = [];
+    enemyFirstSpawned = false;
+    enemyNextSpawnAt = 0;
+    niemandPending = false;
+    enemySpawnCount = 0;
+    leaderboardPrompted = false;
 
     currentState = STATE_MENU; 
     bgMusic.pause(); bgMusic.currentTime = 0;
+    chainsawAudio.pause();
+    chainsawAudio.currentTime = 0;
 }
 
 function getMousePos(canvas, evt) {
@@ -616,9 +956,20 @@ function getMousePos(canvas, evt) {
 }
 
 function handleInput(e) {
+    if (niemandPending) {
+        niemandAudio.play()
+            .then(() => { niemandPending = false; })
+            .catch(() => {});
+    }
     if (e.type === 'keydown' && e.code === "Space") {
         if (currentState === STATE_PLAYING) bird.jump();
-        else if (currentState === STATE_READY) { currentState = STATE_PLAYING; bird.jump(); bgMusic.play().catch(e => console.log(e)); }
+        else if (currentState === STATE_READY) {
+            currentState = STATE_PLAYING;
+            enemyFirstSpawned = false;
+            enemyNextSpawnAt = performance.now() + 15000;
+            bird.jump();
+            bgMusic.play().catch(e => console.log(e));
+        }
         return; 
     }
     if (e.type === 'click' || e.type === 'touchstart') {
@@ -637,7 +988,11 @@ function handleInput(e) {
             }
         }
         else if (currentState === STATE_READY) {
-            currentState = STATE_PLAYING; bird.jump(); bgMusic.play().catch(e => console.log(e));
+            currentState = STATE_PLAYING;
+            enemyFirstSpawned = false;
+            enemyNextSpawnAt = performance.now() + 15000;
+            bird.jump();
+            bgMusic.play().catch(e => console.log(e));
         }
         else if (currentState === STATE_PLAYING) {
             bird.jump();
@@ -653,3 +1008,5 @@ canvas.addEventListener("touchstart", function(e) {
 }, {passive: false});
 
 loop();
+
+updateLeaderboardUI();

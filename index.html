@@ -3,11 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>PINGSTA'S RAGE</title>
+    <title>PINGSTA'S - RGB Edition</title>
+    <!-- Knochen-Schrift -->
+    <link href="https://fonts.googleapis.com/css2?family=Creepster&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <canvas id="gameCanvas"></canvas>
+    <div id="game-container">
+        <!-- Interne Auflösung bleibt 320x480 für Retro-Feeling, CSS skaliert es hoch -->
+        <canvas id="gameCanvas" width="320" height="480"></canvas>
+    </div>
     <script src="script.js"></script>
 </body>
 </html>

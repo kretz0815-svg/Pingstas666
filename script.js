@@ -36,7 +36,7 @@ const ak47Img = new Image();
 ak47Img.src = "assets/AK47.webp";
 
 const bgImg = new Image();
-bgImg.src = "background.webp"; 
+bgImg.src = "assets/background.webp"; 
 
 // --- AUDIO ---
 const fatalityAudio = new Audio("Fatality (Mortal Kombat) - QuickSounds.com.mp3");

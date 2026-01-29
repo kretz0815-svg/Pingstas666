@@ -1,28 +1,6 @@
 body {
     margin: 0;
     padding: 0;
-    background-color: #2c3e50;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    height: 100vh;
-    font-family: 'Arial', sans-serif;
-    overflow: hidden;
-    user-select: none; /* Verhindert Markieren von Text */
-}
-
-#game-container {
-    position: relative;
-    box-shadow: 0 0 30px rgba(0,0,0,0.8);
-    border: 5px solid #fff;
-    border-radius: 4px;
-}
-
-canvas {
-    display: block;
-    background-color: #000; /* Fallback Farbe */body {
-    margin: 0;
-    padding: 0;
     background-color: #000; /* Schwarzer Rand */
     display: flex;
     justify-content: center;
@@ -46,6 +24,4 @@ canvas {
     /* Rendering für Pixel-Art optimieren */
     image-rendering: pixelated; 
     image-rendering: crisp-edges;
-}
-
 }
